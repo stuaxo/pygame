@@ -21,8 +21,8 @@
 
 #include <X11/Xutil.h>
 
-static Display *SDL_Display;
-static Window SDL_Window;
+static Display *sdl_display;
+static Window sdl_window;
 static void (*Lock_Display)(void);
 static void (*Unlock_Display)(void);
 
@@ -77,7 +77,7 @@ _convert_format (char *type)
         return XA_PIXMAP;
     if (strcmp (type, PYGAME_SCRAP_PBM) == 0)
         return XA_BITMAP;
-    return XInternAtom (SDL_Display, type, False);
+    return XInternAtom (sdl_display, type, False);
 }
 
 /**
@@ -86,17 +86,17 @@ _convert_format (char *type)
 static void
 _init_atom_types (void)
 {
-    _atom_UTF8 = XInternAtom (SDL_Display, "UTF8_STRING", False);
-    _atom_TEXT = XInternAtom (SDL_Display, "TEXT", False);
-    _atom_COMPOUND = XInternAtom (SDL_Display, "COMPOUND_TEXT", False);
-    _atom_MIME_PLAIN = XInternAtom (SDL_Display, "text/plain", False);
-    _atom_MIME_UTF8  = XInternAtom (SDL_Display, "text/plain;charset=utf-8",
+    _atom_UTF8 = XInternAtom (sdl_display, "UTF8_STRING", False);
+    _atom_TEXT = XInternAtom (sdl_display, "TEXT", False);
+    _atom_COMPOUND = XInternAtom (sdl_display, "COMPOUND_TEXT", False);
+    _atom_MIME_PLAIN = XInternAtom (sdl_display, "text/plain", False);
+    _atom_MIME_UTF8  = XInternAtom (sdl_display, "text/plain;charset=utf-8",
                                     False);
-    _atom_TARGETS = XInternAtom (SDL_Display, "TARGETS", False);
-    _atom_TIMESTAMP = XInternAtom (SDL_Display, "TIMESTAMP", False);
-    _atom_SDL = XInternAtom (SDL_Display, "SDL_SELECTION", False);
-    _atom_BMP = XInternAtom (SDL_Display, PYGAME_SCRAP_BMP, False);
-    _atom_CLIPBOARD = XInternAtom (SDL_Display, "CLIPBOARD", False);
+    _atom_TARGETS = XInternAtom (sdl_display, "TARGETS", False);
+    _atom_TIMESTAMP = XInternAtom (sdl_display, "TIMESTAMP", False);
+    _atom_SDL = XInternAtom (sdl_display, "SDL_SELECTION", False);
+    _atom_BMP = XInternAtom (sdl_display, PYGAME_SCRAP_BMP, False);
+    _atom_CLIPBOARD = XInternAtom (sdl_display, "CLIPBOARD", False);
 }
 
 /**
@@ -114,7 +114,7 @@ _atom_to_string (Atom a)
 
     if (!a)
         return NULL;
-    name = XGetAtomName (SDL_Display, a);
+    name = XGetAtomName (sdl_display, a);
     retval = strdup (name);
     XFree (name);
     return retval;
@@ -140,7 +140,7 @@ _add_clip_data (Atom cliptype, char *data, int srclen)
     tmp = Bytes_FromStringAndSize (data, srclen);
     PyDict_SetItemString (dict, key, tmp);
     Py_DECREF (tmp);
-    XChangeProperty (SDL_Display, SDL_Window, clip, cliptype,
+    XChangeProperty (sdl_display, sdl_window, clip, cliptype,
                      8, PropModeReplace, (unsigned char *) data, srclen);
     free (key);
 }
@@ -161,7 +161,7 @@ _clipboard_filter (const SDL_Event *event)
     if (event->type != SDL_SYSWMEVENT)
         return 1;
 
-    XEvent xevent = event->syswm.msg->event.xevent;
+    XEvent xevent = event->syswm.msg->x11.event.xevent;
 
     /* Handle window-manager specific clipboard events */
     switch (xevent.type)
@@ -382,17 +382,17 @@ _get_scrap_owner (Atom *selection)
                               XA_CUT_BUFFER4, XA_CUT_BUFFER5, XA_CUT_BUFFER6,
                               XA_CUT_BUFFER7 };
 
-    Window owner = XGetSelectionOwner (SDL_Display, *selection);
+    Window owner = XGetSelectionOwner (sdl_display, *selection);
     if (owner != None)
         return owner;
 
-    owner = XGetSelectionOwner (SDL_Display, _atom_CLIPBOARD);
+    owner = XGetSelectionOwner (sdl_display, _atom_CLIPBOARD);
     if (owner != None)
         return owner;
 
     while (i < 10)
     {
-        owner = XGetSelectionOwner (SDL_Display, buffers[i]);
+        owner = XGetSelectionOwner (sdl_display, buffers[i]);
         if (owner != None)
         {
             *selection = buffers[i];
@@ -470,16 +470,16 @@ _get_data_as (Atom source, Atom format, unsigned long *length)
      * Flush afterwards, so we have an immediate effect and do not receive
      * the old buffer anymore.
      */
-    XConvertSelection (SDL_Display, source, format, _atom_SDL, SDL_Window,
+    XConvertSelection (sdl_display, source, format, _atom_SDL, sdl_window,
                        timestamp);
-    XSync (SDL_Display, False);
+    XSync (sdl_display, False);
 
     /* Let's wait for the SelectionNotify event from the callee and
      * react upon it as soon as it is received.
      */
     for (start = time (0);;)
     {
-        if (XCheckTypedWindowEvent (SDL_Display, SDL_Window,
+        if (XCheckTypedWindowEvent (sdl_display, sdl_window,
                                     SelectionNotify, &ev))
             break;
         if (time (0) - start >= 5)
@@ -493,7 +493,7 @@ _get_data_as (Atom source, Atom format, unsigned long *length)
     /* Get any property type and check the sel_type afterwards to decide
      * what to do.
      */
-    if (XGetWindowProperty (SDL_Display, ev.xselection.requestor,
+    if (XGetWindowProperty (sdl_display, ev.xselection.requestor,
                             _atom_SDL, 0, 0, True,
                             AnyPropertyType, &sel_type, &sel_format,
                             &nbytes, &overflow, &src) != Success)
@@ -538,13 +538,13 @@ _get_data_as (Atom source, Atom format, unsigned long *length)
     if (retval)
     {
         unsigned long boffset = 0;
-        chunk = MAX_CHUNK_SIZE(SDL_Display);
+        chunk = MAX_CHUNK_SIZE(sdl_display);
         memset (retval, 0, (size_t) (*length + 1));
 
         /* Read as long as there is data. */
         while (overflow)
         {
-            if (XGetWindowProperty (SDL_Display, ev.xselection.requestor,
+            if (XGetWindowProperty (sdl_display, ev.xselection.requestor,
                                     _atom_SDL, offset, chunk, True,
                                     AnyPropertyType, &sel_type, &sel_format,
                                     &nbytes, &overflow, &src) != Success)
@@ -580,7 +580,7 @@ _get_data_as (Atom source, Atom format, unsigned long *length)
         p.nitems = nbytes;
         p.value = retval;
 
-        status = XmbTextPropertyToTextList (SDL_Display, &p, &list, &count);
+        status = XmbTextPropertyToTextList (sdl_display, &p, &list, &count);
         if (status == XLocaleNotSupported || status == XConverterNotFound)
         {
             free (retval);
@@ -633,14 +633,18 @@ _get_data_as (Atom source, Atom format, unsigned long *length)
 int
 pygame_scrap_init (void)
 {
+    SDL_Window *win = Py_GetDefaultWindow ();
     SDL_SysWMinfo info;
     int retval = 0;
 
     /* Grab the window manager specific information */
     SDL_SetError ("SDL is not running on known window manager");
 
+    if (!win)
+        return retval;
+
     SDL_VERSION (&info.version);
-    if (SDL_GetWMInfo (&info))
+    if (SDL_GetWindowInfo (win, &info))
     {
         /* Save the information for later use */
         if (info.subsystem == SDL_SYSWM_X11)
@@ -650,8 +654,8 @@ pygame_scrap_init (void)
 
             newattrs.event_mask = PropertyChangeMask;
 
-            SDL_Display = info.info.x11.display;
-            SDL_Window = info.info.x11.window;
+            sdl_display = info.info.x11.display;
+            sdl_window = info.info.x11.window;
             Lock_Display = info.info.x11.lock_func;
             Unlock_Display = info.info.x11.unlock_func;
 
@@ -660,10 +664,10 @@ pygame_scrap_init (void)
             /* We need the PropertyNotify event for the timestap, so
              * modify the event attributes.
              */
-            XGetWindowAttributes (SDL_Display, SDL_Window, &setattrs);
+            XGetWindowAttributes (sdl_display, sdl_window, &setattrs);
             newattrs.event_mask |= setattrs.all_event_masks;
             XChangeWindowAttributes
-                (SDL_Display, SDL_Window, CWEventMask, &newattrs);
+                (sdl_display, sdl_window, CWEventMask, &newattrs);
 
             Unlock_Display ();
 
@@ -697,8 +701,8 @@ pygame_scrap_lost (void)
     }
 
     Lock_Display ();
-    retval = (XGetSelectionOwner (SDL_Display, GET_CLIPATOM (_currentmode))
-              != SDL_Window);
+    retval = (XGetSelectionOwner (sdl_display, GET_CLIPATOM (_currentmode))
+              != sdl_window);
     Unlock_Display ();
 
     return retval;
@@ -734,7 +738,7 @@ pygame_scrap_put (char *type, int srclen, char *src)
     }
 
     /* Update the clipboard property with the buffer. */
-    XChangeProperty (SDL_Display, SDL_Window, clip, cliptype,
+    XChangeProperty (sdl_display, sdl_window, clip, cliptype,
                      8, PropModeReplace, (unsigned char *) src, srclen);
 
     if (cliptype == _atom_MIME_PLAIN)
@@ -746,12 +750,12 @@ pygame_scrap_put (char *type, int srclen, char *src)
         _add_clip_data (_atom_UTF8, src, srclen);
         _add_clip_data (_atom_TEXT, src, srclen);
     }
-    XSync (SDL_Display, False);
+    XSync (sdl_display, False);
 
     /* Update the timestamp */
     for (start = time (0);;)
     {
-        if (XCheckTypedWindowEvent (SDL_Display, SDL_Window,
+        if (XCheckTypedWindowEvent (sdl_display, sdl_window,
                                     PropertyNotify, &ev))
             break;
         if (time (0) - start >= 5)
@@ -775,8 +779,8 @@ pygame_scrap_put (char *type, int srclen, char *src)
 
 SETSELECTIONOWNER:
     /* Set the selection owner to the own window. */
-    XSetSelectionOwner (SDL_Display, clip, SDL_Window, timestamp);
-    if (XGetSelectionOwner (SDL_Display, clip) != SDL_Window)
+    XSetSelectionOwner (sdl_display, clip, sdl_window, timestamp);
+    if (XGetSelectionOwner (sdl_display, clip) != sdl_window)
     {
         /* Ouch, we could not toggle the selection owner. Raise an
          * error, as it's not guaranteed, that the clipboard
